@@ -1,0 +1,16 @@
+# Secrets -- never commit
+.env
+docker/.env
+*.pem
+*_deploy
+*_deploy.pub
+pi-gateway-deploy*
+
+# Local tooling
+.venv/
+.ansible/
+*.retry
+__pycache__/
+
+# Local output
+discovery-*.txt

@@ -1,0 +1,11 @@
+---
+# Overridden in group_vars/gateway.yml; defaults here keep the role usable
+# on its own.
+tailscale_hostname: "{{ inventory_hostname }}"
+tailscale_advertise_exit_node: true
+tailscale_advertise_routes: []
+
+# Auth key for the FIRST join only. Read from the environment so it never
+# lands in the repo, inventory, or process list. Once the node is logged in
+# this is ignored; tailscaled keeps its own node key in /var/lib/tailscale.
+tailscale_authkey: "{{ lookup('ansible.builtin.env', 'TS_AUTHKEY', default='') }}"

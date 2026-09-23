@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: tailscale
+  author: pi-gateway
+  description: Tailscale exit node + subnet router with idempotent prefs
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies: []

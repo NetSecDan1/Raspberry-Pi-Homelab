@@ -1,0 +1,13 @@
+---
+stack_dir: "/opt/pi-gateway"
+stack_timezone: "{{ timezone | default('Etc/UTC') }}"
+
+# Pi-hole admin password, read from the environment (GitHub Secret in CI).
+stack_pihole_password: "{{ lookup('ansible.builtin.env', 'PIHOLE_WEBPASSWORD', default='') }}"
+
+# Ports Pi-hole binds on the host (host networking). If anything other than
+# Pi-hole already holds one of these, we stop instead of fighting over it.
+stack_host_ports: [53, 80, 443]
+
+# Where the compose files live in this repo, relative to the playbook.
+stack_repo_docker_dir: "{{ playbook_dir }}/../docker"

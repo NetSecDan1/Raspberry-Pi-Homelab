@@ -1,0 +1,104 @@
+---
+# Deploys docker/ from this repo to {{ stack_dir }} and runs `docker compose up`.
+# Blast radius: containers whose config/image changed are recreated.
+# Recreating pihole = a few seconds without DNS for the whole LAN.
+
+- name: Set whether Docker is usable in this run
+  ansible.builtin.set_fact:
+    # False only during --check on a Pi that doesn't have Docker yet.
+    stack_docker_present: "{{ not ansible_check_mode or 'docker-ce' in ansible_facts.packages }}"
+
+- name: Require the Pi-hole admin password
+  ansible.builtin.assert:
+    that: stack_pihole_password | length > 0
+    fail_msg: "PIHOLE_WEBPASSWORD is not set in the environment. export it (locally) or add the GitHub Secret (CI)."
+    quiet: true
+
+# ---- Preflight: port conflicts ------------------------------------------------
+# Read-only. Catches the two common surprises: systemd-resolved's stub
+# listener on :53 (Ubuntu) and a leftover bare-metal Pi-hole/lighttpd on :80.
+- name: List listening sockets
+  ansible.builtin.command:
+    argv: [ss, -Hlntup]
+  register: stack_port_listeners
+  changed_when: false
+  check_mode: false
+
+- name: Fail on port conflicts not owned by Pi-hole or Docker
+  ansible.builtin.assert:
+    that: stack_port_conflicts | length == 0
+    fail_msg: |
+      These processes already hold ports Pi-hole needs ({{ stack_host_ports | join(', ') }}):
+      {{ stack_port_conflicts | join(' ; ') }}
+      Stop/disable them first (e.g. systemd-resolved: set DNSStubListener=no;
+      old bare-metal Pi-hole: `pihole uninstall`). Not changing this automatically.
+    quiet: true
+  vars:
+    stack_port_conflicts: >-
+      {{ stack_port_listeners.stdout_lines
+         | select('search', ':(' ~ (stack_host_ports | join('|')) ~ ')\s')
+         | reject('search', 'pihole-FTL')
+         | reject('search', 'docker-proxy')
+         | list }}
+
+# ---- Files ----------------------------------------------------------------------
+- name: Create stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ stack_dir }}"
+    - "{{ stack_dir }}/unbound"
+    - "{{ stack_dir }}/data"
+    - "{{ stack_dir }}/data/pihole"
+    - "{{ stack_dir }}/data/uptime-kuma"
+
+- name: Copy compose file
+  ansible.builtin.copy:
+    src: "{{ stack_repo_docker_dir }}/docker-compose.yml"
+    dest: "{{ stack_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Unbound's image runs as uid 101 and needs to read this, hence 0644.
+- name: Copy Unbound config
+  ansible.builtin.copy:
+    src: "{{ stack_repo_docker_dir }}/unbound/unbound.conf"
+    dest: "{{ stack_dir }}/unbound/unbound.conf"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render .env (contains the Pi-hole password -> root-only)
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ stack_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# ---- Bring the stack up -----------------------------------------------------------
+# docker_compose_v2 is idempotent: it only recreates containers whose
+# definition or image changed. wait: true blocks until healthchecks pass,
+# so a broken deploy fails HERE instead of silently later.
+- name: Validate compose file on the Pi
+  ansible.builtin.command:
+    argv: [docker, compose, --project-directory, "{{ stack_dir }}", config, --quiet]
+  changed_when: false
+  check_mode: false
+  when: stack_docker_present
+
+- name: Start the stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ stack_dir }}"
+    state: present
+    pull: missing
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+  when: stack_docker_present

@@ -1,0 +1,78 @@
+---
+# Docker Engine from Docker's official apt repo (the distro's docker.io lags
+# behind and ships an old compose). Blast radius: installs packages; a
+# daemon.json change restarts dockerd, which restarts all containers
+# (a brief DNS outage once the stack is running).
+
+- name: Refuse to run over a conflicting Docker install
+  ansible.builtin.assert:
+    that: docker_conflicts | length == 0
+    fail_msg: >-
+      Found distro Docker packages {{ docker_conflicts | join(', ') }}.
+      They conflict with docker-ce. Remove them yourself after checking
+      nothing depends on them (apt remove {{ docker_conflicts | join(' ') }}),
+      then re-run. Not doing it automatically.
+    quiet: true
+  vars:
+    docker_conflicts: "{{ docker_conflicting_packages | select('in', ansible_facts.packages) | list }}"
+
+- name: Install apt repo prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - python3-debian     # required by deb822_repository
+      - python3-requests   # required by community.docker modules
+      - python3-yaml
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# deb822 is the modern .sources format; signed_by pins this repo to Docker's
+# key so a compromised mirror of some *other* repo can't ship "docker-ce".
+- name: Add Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
+    suites: ["{{ ansible_distribution_release }}"]
+    components: [stable]
+    architectures: [arm64]
+    signed_by: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    state: present
+  register: docker_repo
+
+# In --check mode the repo above isn't really added, so apt can't see
+# docker-ce yet. Skip rather than fail; the real run installs it.
+- name: Install Docker Engine and Compose plugin
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: "{{ docker_repo is changed }}"
+  when: not ansible_check_mode or 'docker-ce' in ansible_facts.packages
+
+- name: Ensure /etc/docker exists
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure Docker daemon (log rotation)
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+- name: Enable and start Docker
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+  when: not ansible_check_mode or 'docker-ce' in ansible_facts.packages
+
+# Note: we intentionally do NOT add your user to the "docker" group.
+# Membership is root-equivalent. Use "sudo docker ..." on the Pi.

@@ -1,0 +1,163 @@
+---
+# Tailscale on the host (not in Docker): it needs kernel IP forwarding and
+# the host's routing table to act as an exit node / subnet router.
+# Blast radius: first join adds the Pi to your tailnet; a prefs change
+# briefly re-announces routes (remote clients may blip for a second or two).
+
+- name: Add Tailscale apt repository
+  ansible.builtin.deb822_repository:
+    name: tailscale
+    types: [deb]
+    uris: "https://pkgs.tailscale.com/stable/{{ ansible_distribution | lower }}"
+    suites: ["{{ ansible_distribution_release }}"]
+    components: [main]
+    signed_by: "https://pkgs.tailscale.com/stable/{{ ansible_distribution | lower }}/{{ ansible_distribution_release }}.noarmor.gpg"
+    state: present
+  register: tailscale_repo
+
+- name: Set whether Tailscale is usable in this run
+  ansible.builtin.set_fact:
+    # False only during --check on a Pi that doesn't have Tailscale yet.
+    tailscale_present: "{{ not ansible_check_mode or 'tailscale' in ansible_facts.packages }}"
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: "{{ tailscale_repo is changed }}"
+  when: tailscale_present
+
+# Exit nodes and subnet routers forward other machines' packets, which Linux
+# refuses to do unless these are on. Written to its own sysctl.d file so it
+# survives reboots and is easy to find/remove.
+- name: Enable IP forwarding (IPv4 + IPv6)
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_file: /etc/sysctl.d/99-pi-gateway-forwarding.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - net.ipv4.ip_forward
+    - net.ipv6.conf.all.forwarding
+
+- name: Enable and start tailscaled
+  ansible.builtin.systemd_service:
+    name: tailscaled
+    enabled: true
+    state: started
+  when: tailscale_present
+
+# ---- Login (first run only) --------------------------------------------------
+# Read-only; check_mode: false lets it run during --check too so the preview
+# can report real state.
+- name: Read Tailscale backend state
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_status_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: tailscale_present
+
+- name: Parse Tailscale backend state
+  ansible.builtin.set_fact:
+    tailscale_backend_state: >-
+      {{ ((tailscale_status_json if tailscale_status_json.startswith('{') else '{}')
+          | from_json).BackendState | default('NotInstalled') }}
+  vars:
+    tailscale_status_json: "{{ tailscale_status_raw.stdout | default('', true) | trim }}"
+
+- name: Compute desired Tailscale flags
+  ansible.builtin.set_fact:
+    tailscale_desired_routes: >-
+      {{ (tailscale_advertise_routes
+          + (['0.0.0.0/0', '::/0'] if tailscale_advertise_exit_node else []))
+         | sort }}
+    # --accept-dns=false: the Pi must NOT use tailnet DNS. If the tailnet's
+    # DNS points at this Pi-hole, the Pi would resolve through itself and a
+    # Pi-hole outage would also break the Pi's own apt/docker pulls.
+    tailscale_flags:
+      - "--hostname={{ tailscale_hostname }}"
+      - "--advertise-exit-node={{ tailscale_advertise_exit_node | string | lower }}"
+      - "--advertise-routes={{ tailscale_advertise_routes | join(',') }}"
+      - "--accept-dns=false"
+
+- name: Log in to the tailnet
+  when:
+    - tailscale_present
+    - tailscale_backend_state != "Running"
+  block:
+    - name: Require an auth key for first login
+      ansible.builtin.assert:
+        that: tailscale_authkey | length > 0
+        fail_msg: >-
+          Tailscale is not logged in (state {{ tailscale_backend_state }}) and
+          TS_AUTHKEY is not set. Create a one-off, non-reusable auth key in the
+          Tailscale admin console (Settings > Keys), export TS_AUTHKEY=... and
+          re-run. See MVP-RUNBOOK.md "Rotate the Tailscale auth key".
+        quiet: true
+
+    # "file:" makes tailscale read the key from disk, so it never appears in
+    # `ps` output or shell history on the Pi.
+    - name: Stage auth key in a root-only temp file
+      ansible.builtin.copy:
+        content: "{{ tailscale_authkey }}"
+        dest: /root/.tailscale-authkey
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Run tailscale up
+      ansible.builtin.command:
+        argv: "{{ ['tailscale', 'up', '--auth-key=file:/root/.tailscale-authkey'] + tailscale_flags }}"
+      register: tailscale_up
+      changed_when: true
+      # No no_log needed: the key is in a file, not argv, and hiding this
+      # task's output would also hide the reason a join failed.
+
+  always:
+    - name: Remove staged auth key
+      ansible.builtin.file:
+        path: /root/.tailscale-authkey
+        state: absent
+
+# ---- Drift correction (every run) -------------------------------------------
+# `tailscale set` changes prefs without re-authenticating. We only call it
+# when current prefs differ from what's declared here, so re-runs report
+# "ok" instead of "changed" -- that's what makes this idempotent.
+- name: Read current Tailscale prefs
+  ansible.builtin.command: tailscale debug prefs
+  register: tailscale_prefs_raw
+  changed_when: false
+  check_mode: false
+  when:
+    - tailscale_present
+    - tailscale_backend_state == "Running" or tailscale_up is changed
+
+- name: Compare current prefs to desired
+  ansible.builtin.set_fact:
+    tailscale_drift: >-
+      {{ ((tailscale_prefs.AdvertiseRoutes | default([], true) | sort) != tailscale_desired_routes)
+         or (tailscale_prefs.CorpDNS | default(true))
+         or (tailscale_prefs.Hostname | default('') != tailscale_hostname) }}
+  vars:
+    tailscale_prefs: "{{ tailscale_prefs_raw.stdout | from_json }}"
+  when: tailscale_prefs_raw is not skipped
+
+- name: Apply Tailscale prefs
+  ansible.builtin.command:
+    argv: "{{ ['tailscale', 'set'] + tailscale_flags }}"
+  changed_when: true
+  when: tailscale_drift | default(false)
+
+- name: Remind about manual approval in the admin console
+  ansible.builtin.debug:
+    msg: >-
+      Advertised {{ tailscale_desired_routes | join(', ') }}. Routes and
+      exit-node use stay PENDING until approved at
+      https://login.tailscale.com/admin/machines -> {{ tailscale_hostname }}
+      -> Edit route settings (unless your tailnet policy auto-approves them).
+      Also consider "Disable key expiry" for this machine.
+  when: tailscale_up is changed or (tailscale_drift | default(false))

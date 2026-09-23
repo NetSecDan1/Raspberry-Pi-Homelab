@@ -1,0 +1,7 @@
+---
+- name: Restart docker
+  ansible.builtin.systemd_service:
+    name: docker
+    state: restarted
+  # The unit doesn't exist yet during --check on a fresh Pi.
+  when: not ansible_check_mode or 'docker-ce' in ansible_facts.packages

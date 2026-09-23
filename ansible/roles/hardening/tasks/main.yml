@@ -1,0 +1,80 @@
+---
+# Host hardening: SSH key-only auth, fail2ban on sshd, automatic security
+# updates. Blast radius: sshd reload (existing sessions survive), no reboot.
+
+- name: Install hardening packages
+  ansible.builtin.apt:
+    name:
+      - fail2ban
+      - python3-systemd       # lets fail2ban read the systemd journal
+      - unattended-upgrades
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# In --check mode on a fresh Pi the packages above aren't really installed,
+# so tasks that need them are skipped (package facts come from preflight).
+# That's expected: check mode is a preview, not a simulation.
+- name: Decide whether service tasks can run in this mode
+  ansible.builtin.set_fact:
+    hardening_can_manage_services: "{{ not ansible_check_mode or 'fail2ban' in ansible_facts.packages }}"
+
+# --- SSH ---------------------------------------------------------------------
+# sshd uses the FIRST value it sees for a setting, and Debian's sshd_config
+# includes sshd_config.d/*.conf at the very top. A "00-" prefix makes our
+# file win over e.g. cloud-init's 50-cloud-init.conf.
+- name: Deploy sshd hardening drop-in
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-pi-gateway.conf
+    owner: root
+    group: root
+    mode: "0644"
+    # Refuse to write a config sshd can't parse -- a broken sshd config on a
+    # headless Pi means pulling the SD card.
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd
+
+# --- fail2ban ------------------------------------------------------------------
+- name: Deploy fail2ban jail config
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.d/pi-gateway.local
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    enabled: true
+    state: started
+  when: hardening_can_manage_services
+
+# --- unattended-upgrades -------------------------------------------------------
+- name: Enable periodic apt update + unattended-upgrade
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure unattended-upgrades origins and reboot policy
+  ansible.builtin.template:
+    src: 52pi-gateway-unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/52pi-gateway-unattended-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable apt timers that drive unattended-upgrades
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+  when: hardening_can_manage_services

@@ -1,0 +1,45 @@
+---
+# Nightly local backup of Pi-hole config (Teleporter export), Uptime Kuma
+# data, and the deployed stack config. Blast radius: none at deploy time.
+#
+# IMPORTANT: these backups live on the same SD card they protect. Pull them
+# off the Pi regularly -- see MVP-RUNBOOK.md "Backups".
+
+- name: Ensure cron is installed
+  ansible.builtin.apt:
+    name: cron
+    state: present
+
+- name: Create backup directory (root-only; backups contain secrets)
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install backup config
+  ansible.builtin.template:
+    src: pi-gateway-backup.default.j2
+    dest: /etc/default/pi-gateway-backup
+    owner: root
+    group: root
+    mode: "0644"
+
+# A plain file (not a template) so CI can shellcheck it as-is.
+- name: Install backup script
+  ansible.builtin.copy:
+    src: pi-gateway-backup.sh
+    dest: /usr/local/sbin/pi-gateway-backup
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Schedule nightly backup
+  ansible.builtin.cron:
+    name: pi-gateway nightly backup
+    cron_file: pi-gateway-backup
+    user: root
+    hour: "{{ backup_cron_hour }}"
+    minute: "{{ backup_cron_minute }}"
+    job: "/usr/local/sbin/pi-gateway-backup 2>&1 | logger -t pi-gateway-backup"

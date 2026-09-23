@@ -1,0 +1,20 @@
+---
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Distro-packaged Docker variants that conflict with Docker's official repo.
+# If any are present we stop rather than rip them out: that's your call.
+docker_conflicting_packages:
+  - docker.io
+  - docker-compose
+  - docker-doc
+  - podman-docker
+
+# Container log rotation. Without this, json-file logs grow forever and
+# chew through SD card space and write endurance.
+docker_log_max_size: "10m"
+docker_log_max_file: "3"

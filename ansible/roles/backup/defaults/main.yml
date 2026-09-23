@@ -1,0 +1,9 @@
+---
+# Where roles/stack deployed the compose project.
+backup_stack_dir: "{{ stack_dir | default('/opt/pi-gateway') }}"
+backup_dir: "/var/backups/pi-gateway"
+backup_retention_days: 14
+# 03:30 daily. Uptime Kuma is stopped for a few seconds during the backup
+# (for a consistent SQLite copy); Pi-hole keeps serving DNS throughout.
+backup_cron_hour: "3"
+backup_cron_minute: "30"

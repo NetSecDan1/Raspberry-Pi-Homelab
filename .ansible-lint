@@ -1,0 +1,9 @@
+---
+# "production" is ansible-lint's strictest built-in profile: FQCN module
+# names, named tasks, no risky shell usage, idempotency hints, etc.
+profile: production
+exclude_paths:
+  - .github/
+  - .venv/
+  - .ansible/
+  - docker/

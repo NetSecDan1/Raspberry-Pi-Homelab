@@ -1,0 +1,112 @@
+---
+# Pi gateway container stack.
+#
+# Deployed by Ansible (roles/stack) to /opt/pi-gateway on the Pi. To test
+# rendering locally:
+#   docker compose --env-file docker/.env.example -f docker/docker-compose.yml config
+#
+# Every image is pinned to an exact version. Upgrades happen on purpose:
+# Dependabot opens a PR bumping the tag, CI lints it, you merge and run the
+# deploy workflow. Watchtower only picks up re-published builds of the SAME
+# tag (e.g. a security rebuild) -- it never jumps versions on its own.
+#
+# DNS path:  LAN/tailnet client -> Pi-hole (host :53) -> Unbound (127.0.0.1:5335)
+#            -> root/authoritative servers directly (no Google/Cloudflare).
+
+name: pi-gateway
+
+x-watchtower: &watchtower-enabled
+  com.centurylinklabs.watchtower.enable: "true"
+
+services:
+  pihole:
+    image: pihole/pihole:2026.09.0
+    container_name: pihole
+    # Host networking: Pi-hole sees real client IPs (per-device stats and
+    # group rules work) and answers on the Pi's own LAN + tailnet addresses.
+    # Bridge mode + port mapping would NAT every client to the Docker gateway
+    # IP. Alternative (not implemented): macvlan, giving Pi-hole its own LAN
+    # IP -- see README "Pi-hole networking".
+    network_mode: host
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      # Pi-hole v6 is configured with FTLCONF_<section>_<key> variables.
+      # Anything set here is locked in the web UI -- that's the point:
+      # the repo is the source of truth.
+      FTLCONF_webserver_api_password: ${PIHOLE_WEBPASSWORD:?set PIHOLE_WEBPASSWORD in .env}
+      FTLCONF_dns_upstreams: "127.0.0.1#5335"
+      # "all": answer queries arriving on any interface. Needed because
+      # tailnet clients (100.x.y.z via tailscale0) are not "local" to the
+      # LAN subnet. Safe ONLY because nothing is port-forwarded to this Pi.
+      # Never add a router port forward for 53 -- that makes an open resolver.
+      FTLCONF_dns_listeningMode: "all"
+      # Unbound already validates DNSSEC; doing it twice just adds latency.
+      FTLCONF_dns_dnssec: "false"
+      # Pi-hole v6 ships an NTP server and clock-sync client. The host
+      # already keeps time; turn both off so FTL doesn't grab UDP 123.
+      FTLCONF_ntp_ipv4_active: "false"
+      FTLCONF_ntp_ipv6_active: "false"
+      FTLCONF_ntp_sync_active: "false"
+    volumes:
+      - ./data/pihole:/etc/pihole
+    depends_on:
+      unbound:
+        condition: service_healthy
+    restart: unless-stopped
+    labels: *watchtower-enabled
+
+  unbound:
+    # Maintained, multi-arch, distroless build of NLnet Labs' Unbound.
+    image: klutchell/unbound:1.26.1
+    container_name: unbound
+    # Published on loopback ONLY: reachable by Pi-hole on the host, not by
+    # the LAN. Clients must go through Pi-hole's blocking.
+    ports:
+      - "127.0.0.1:5335:53/tcp"
+      - "127.0.0.1:5335:53/udp"
+    volumes:
+      # The image includes every *.conf in custom.conf.d after its defaults.
+      - ./unbound/unbound.conf:/etc/unbound/custom.conf.d/pi-gateway.conf:ro
+    healthcheck:
+      # drill-hc ships in the image (no shell in distroless). Healthy means
+      # full recursion + DNSSEC validation to the internet works.
+      test: ["CMD", "drill-hc", "@127.0.0.1", "dnssec.works"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    labels: *watchtower-enabled
+
+  watchtower:
+    # Maintained fork: the original containrrr/watchtower has been
+    # unmaintained since 2023 and fails against current Docker Engine APIs.
+    image: nickfedor/watchtower:1.22.3
+    container_name: watchtower
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      # Only touch containers that opt in with the label above.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # 6-field cron (seconds first): Sundays 04:00, when nobody's browsing.
+      WATCHTOWER_SCHEDULE: "0 0 4 * * 0"
+      WATCHTOWER_CLEANUP: "true"
+    volumes:
+      # Docker socket = root on the host. Accepted cost for auto-refresh;
+      # this is the most privileged container in the stack.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    labels: *watchtower-enabled
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.5.5
+    container_name: uptime-kuma
+    ports:
+      # LAN + tailnet reachable. Not internet-reachable: no port forward.
+      - "3001:3001"
+    volumes:
+      - ./data/uptime-kuma:/app/data
+    extra_hosts:
+      # Lets monitors reach host-networked services (Pi-hole) by name.
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    labels: *watchtower-enabled

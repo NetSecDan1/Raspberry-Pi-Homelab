@@ -1,0 +1,18 @@
+---
+# Opens PRs when pinned versions have updates. Pinning without this means
+# silently falling behind on security fixes; with it, every upgrade is a
+# reviewed, linted PR you deploy on purpose.
+version: 2
+updates:
+  - package-ecosystem: docker-compose
+    directory: /docker
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly

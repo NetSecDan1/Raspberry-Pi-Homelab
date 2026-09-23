@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: hardening
+  author: pi-gateway
+  description: SSH key-only auth, fail2ban, unattended security upgrades
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies: []

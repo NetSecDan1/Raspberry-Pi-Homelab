@@ -1,0 +1,88 @@
+---
+# Static checks on every push and PR. Nothing here touches the Pi.
+# Also callable from deploy.yml so a deploy can never skip linting.
+name: lint
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: yamllint --strict .
+
+  ansible-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ansible-galaxy collection install -r ansible/requirements.yml
+      - name: Syntax check
+        working-directory: ansible
+        run: ansible-playbook playbook.yml --syntax-check
+      - name: ansible-lint (production profile)
+        working-directory: ansible
+        run: ansible-lint --offline
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      # shellcheck is preinstalled on GitHub's Ubuntu runners.
+      - name: shellcheck all shell scripts
+        run: |
+          mapfile -t scripts < <(git ls-files '*.sh')
+          echo "Checking: ${scripts[*]}"
+          shellcheck --severity=style "${scripts[@]}"
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Validate compose file renders
+        run: docker compose --env-file docker/.env.example -f docker/docker-compose.yml config --quiet
+      - name: Reject floating image tags
+        run: |
+          # Every image must carry an explicit version tag -- never :latest
+          # and never untagged.
+          bad=$(docker compose --env-file docker/.env.example -f docker/docker-compose.yml config --images \
+                | grep -Ev ':[0-9]+\.[0-9]+' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Unpinned images: $bad"
+            exit 1
+          fi
+
+  hadolint:
+    # No Dockerfiles today; this job starts enforcing as soon as one appears.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: hadolint any Dockerfiles
+        run: |
+          mapfile -t files < <(git ls-files '*Dockerfile*')
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No Dockerfiles found; skipping."
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            echo "hadolint $f"
+            docker run --rm -i hadolint/hadolint:v2.15.1 < "$f"
+          done

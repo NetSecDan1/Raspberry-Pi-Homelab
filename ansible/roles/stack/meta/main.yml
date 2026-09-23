@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: stack
+  author: pi-gateway
+  description: Deploys the Docker Compose stack (Pi-hole, Unbound, Watchtower, Uptime Kuma)
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+dependencies: []

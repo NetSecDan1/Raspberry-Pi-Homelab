@@ -1,0 +1,17 @@
+// {{ ansible_managed }}
+// Loaded after Debian's 50unattended-upgrades. Scalars set here win; LISTS
+// like Origins-Pattern are merged, so Debian's defaults (security + stable
+// point releases) stay active and these entries are added.
+// Docker and Tailscale repos are deliberately NOT listed: upgrading dockerd
+// restarts every container (DNS outage) and upgrading tailscaled drops
+// remote sessions. Those are updated by hand -- see MVP-RUNBOOK.md "Monthly".
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+        "origin=Debian,codename=${distro_codename},label=Debian-Security";
+        "origin=Ubuntu,archive=${distro_codename}-security";
+{% if hardening_upgrade_rpi_archive %}
+        "origin=Raspberry Pi Foundation,codename=${distro_codename}";
+{% endif %}
+};
+Unattended-Upgrade::Automatic-Reboot "{{ hardening_auto_reboot | string | lower }}";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";

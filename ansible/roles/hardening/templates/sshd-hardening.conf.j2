@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+PermitRootLogin no
+{% if hardening_ssh_disable_password %}
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+{% endif %}
+PubkeyAuthentication yes
+MaxAuthTries 4
+X11Forwarding no

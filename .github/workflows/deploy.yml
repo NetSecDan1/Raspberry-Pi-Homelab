@@ -1,0 +1,94 @@
+---
+# Manual deploy to the Pi. Never runs on push/merge: there's one live host
+# and no staging, so a human decides when.
+#
+# Flow (same idea as terraform plan -> approve -> apply):
+#   1. lint      - same checks as every PR
+#   2. check     - ansible-playbook --check --diff against the real Pi
+#   3. apply     - only if you chose "check-then-apply"; pauses for approval
+#                  via the "production" environment, so you can read step 2's
+#                  diff before anything changes.
+#
+# Setup (once) is in README.md "CI/CD setup".
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check-only = dry run. check-then-apply = dry run, then apply after approval."
+        type: choice
+        options: [check-only, check-then-apply]
+        default: check-only
+      tags:
+        description: "Optional Ansible --tags (e.g. stack or tailscale,hardening). Empty = everything."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# One deploy at a time; a second one queues rather than racing the first.
+concurrency:
+  group: deploy-pi-gateway
+  cancel-in-progress: false
+
+env:
+  ANSIBLE_FORCE_COLOR: "1"
+  ANSIBLE_PRIVATE_KEY_FILE: ~/.ssh/id_deploy
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  check:
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/ansible-runner
+        with:
+          ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          pi-host: ${{ vars.PI_TAILSCALE_HOST }}
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          ssh-known-hosts: ${{ secrets.PI_SSH_KNOWN_HOSTS }}
+      - name: ansible-playbook --check --diff
+        working-directory: ansible
+        env:
+          PIHOLE_WEBPASSWORD: ${{ secrets.PIHOLE_WEBPASSWORD }}
+          TAGS: ${{ inputs.tags }}
+          PI_HOST: ${{ vars.PI_TAILSCALE_HOST }}
+        run: |
+          ansible-playbook playbook.yml --check --diff \
+            -e "ansible_host=$PI_HOST" \
+            ${TAGS:+--tags "$TAGS"}
+
+  apply:
+    needs: check
+    if: inputs.mode == 'check-then-apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Configure required reviewers on this environment (Settings ->
+    # Environments -> production) to get the approval pause.
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: ./.github/actions/ansible-runner
+        with:
+          ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          pi-host: ${{ vars.PI_TAILSCALE_HOST }}
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          ssh-known-hosts: ${{ secrets.PI_SSH_KNOWN_HOSTS }}
+      - name: ansible-playbook (apply)
+        working-directory: ansible
+        env:
+          PIHOLE_WEBPASSWORD: ${{ secrets.PIHOLE_WEBPASSWORD }}
+          TAGS: ${{ inputs.tags }}
+          PI_HOST: ${{ vars.PI_TAILSCALE_HOST }}
+        run: |
+          ansible-playbook playbook.yml --diff \
+            -e "ansible_host=$PI_HOST" \
+            ${TAGS:+--tags "$TAGS"}

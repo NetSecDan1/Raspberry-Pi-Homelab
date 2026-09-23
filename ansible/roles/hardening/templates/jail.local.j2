@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1{% for ip in hardening_fail2ban_ignoreip_extra %} {{ ip }}{% endfor %}
+
+bantime  = {{ hardening_fail2ban_bantime }}
+findtime = {{ hardening_fail2ban_findtime }}
+maxretry = {{ hardening_fail2ban_maxretry }}
+
+[sshd]
+enabled = true
+# Debian 12+/Raspberry Pi OS log sshd to the journal, not /var/log/auth.log.
+backend = systemd

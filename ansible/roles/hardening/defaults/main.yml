@@ -1,0 +1,24 @@
+---
+# --- SSH -------------------------------------------------------------------
+# Disables password logins. Only safe once your key works -- which it must,
+# because Ansible itself connects with it. Set false only for troubleshooting.
+hardening_ssh_disable_password: true
+
+# --- fail2ban --------------------------------------------------------------
+hardening_fail2ban_maxretry: 5
+hardening_fail2ban_findtime: "10m"
+hardening_fail2ban_bantime: "1h"
+# Addresses that are never banned. Loopback only by default; add your LAN or
+# tailnet range (100.64.0.0/10) if you'd rather never lock yourself out, at
+# the cost of not catching a compromised device on that network.
+hardening_fail2ban_ignoreip_extra: []
+
+# --- unattended-upgrades ---------------------------------------------------
+# Debian security + point-release updates install automatically. The Pi
+# does NOT reboot itself:
+# a surprise reboot takes DNS down for the whole house. Kernel updates are
+# applied on your schedule -- see MVP-RUNBOOK.md "Monthly".
+hardening_auto_reboot: false
+# Also take updates from the Raspberry Pi archive (kernel/firmware). The
+# pattern simply never matches on non-Raspberry-Pi-OS hosts.
+hardening_upgrade_rpi_archive: true

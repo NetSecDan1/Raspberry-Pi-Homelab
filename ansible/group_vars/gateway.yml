@@ -1,0 +1,30 @@
+---
+# Site-specific settings for the [gateway] group. Everything you are likely
+# to need to change lives here; role defaults (roles/*/defaults/main.yml)
+# hold the rest.
+#
+# Secrets are NOT stored here. They come from environment variables at run
+# time (locally: export them; in CI: GitHub Secrets):
+#   PIHOLE_WEBPASSWORD  - Pi-hole admin UI password (required for the stack role)
+#   TS_AUTHKEY          - Tailscale auth key (only needed the first time the Pi
+#                         joins the tailnet; ignored once it's logged in)
+
+# --- Network ---------------------------------------------------------------
+# EDIT: your home LAN subnet (the one your router hands out via DHCP).
+lan_subnet: "192.168.1.0/24"
+
+# EDIT: your timezone (used by containers and cron-style schedules).
+timezone: "Etc/UTC"
+
+# --- Tailscale -------------------------------------------------------------
+tailscale_hostname: "pi-gateway"
+tailscale_advertise_exit_node: true
+tailscale_advertise_routes:
+  - "{{ lan_subnet }}"
+
+# --- Stack -----------------------------------------------------------------
+stack_dir: "/opt/pi-gateway"
+
+# --- Backups ---------------------------------------------------------------
+backup_dir: "/var/backups/pi-gateway"
+backup_retention_days: 14

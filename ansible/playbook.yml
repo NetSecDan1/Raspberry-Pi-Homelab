@@ -1,0 +1,51 @@
+---
+# Main playbook. Safe to re-run: every role is idempotent, so a second run on
+# an up-to-date Pi should report "changed=0".
+#
+# ALWAYS preview first:
+#   ansible-playbook playbook.yml --check --diff
+# then apply:
+#   ansible-playbook playbook.yml --diff
+#
+# Run a single layer with tags, e.g. --tags tailscale
+
+- name: Preflight - verify this is a host we know how to manage
+  hosts: gateway
+  become: true
+  gather_facts: true
+  tags: [always]
+  tasks:
+    - name: Assert 64-bit Debian-family OS
+      ansible.builtin.assert:
+        that:
+          - ansible_architecture == "aarch64"
+          - ansible_distribution in ["Debian", "Ubuntu"]
+        fail_msg: >-
+          This repo targets 64-bit Raspberry Pi OS / Debian / Ubuntu on arm64.
+          Found {{ ansible_distribution }} {{ ansible_distribution_release }}
+          on {{ ansible_architecture }}. Stopping before touching anything.
+        quiet: true
+
+    # Read-only inventory of installed packages. Roles use it to detect
+    # conflicts (e.g. distro docker.io) and to know what --check can preview.
+    - name: Gather installed package facts
+      ansible.builtin.package_facts:
+        manager: apt
+
+- name: Configure the Pi gateway host
+  hosts: gateway
+  become: true
+  gather_facts: false  # already gathered in preflight
+  roles:
+    # Order matters: hardening first (SSH + patching) so the box is locked
+    # down before we add services; docker before the stack that needs it.
+    - role: hardening
+      tags: [hardening]
+    - role: docker
+      tags: [docker]
+    - role: tailscale
+      tags: [tailscale]
+    - role: stack
+      tags: [stack]
+    - role: backup
+      tags: [backup]
