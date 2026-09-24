@@ -4,7 +4,7 @@
 # Changes nothing: no installs, no writes outside stdout. Run it from your
 # workstation over SSH and save the output for your own reference:
 #
-#   ssh pi@192.168.1.2 'bash -s' < scripts/discover.sh | tee discovery-$(date +%F).txt
+#   ssh pi@$PI_HOST 'bash -s' < scripts/discover.sh | tee discovery-$(date +%F).txt
 #
 # Uses `sudo -n` (non-interactive) for the listening-socket owners only; if
 # passwordless sudo isn't available, that section shows ports without

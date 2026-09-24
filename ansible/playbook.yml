@@ -12,9 +12,22 @@
 - name: Preflight - verify this is a host we know how to manage
   hosts: gateway
   become: true
-  gather_facts: true
+  # Facts are gathered below, AFTER checking we know where to connect.
+  gather_facts: false
   tags: [always]
   tasks:
+    # assert runs on the controller, so this works before any SSH connection.
+    - name: Require PI_HOST
+      ansible.builtin.assert:
+        that: ansible_host | default('') | length > 0
+        fail_msg: >-
+          PI_HOST is not set. export PI_HOST=<Pi's LAN IP> (first run) or its
+          Tailscale IP. It's deliberately not stored in this public repo.
+        quiet: true
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
     - name: Assert 64-bit Debian-family OS
       ansible.builtin.assert:
         that:

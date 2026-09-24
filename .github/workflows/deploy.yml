@@ -10,6 +10,11 @@
 #                  diff before anything changes.
 #
 # Setup (once) is in README.md "CI/CD setup".
+#
+# PUBLIC REPO: Actions logs are world-readable. Secrets are masked in logs,
+# which is why even the Pi's Tailscale address is a secret, not a variable.
+# The .env render (Pi-hole password) runs with no_log. Keep it that way:
+# never add -v/-vvv here, it prints task arguments and results.
 name: deploy
 
 on:
@@ -51,7 +56,7 @@ jobs:
         with:
           ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          pi-host: ${{ vars.PI_TAILSCALE_HOST }}
+          pi-host: ${{ secrets.PI_TAILSCALE_HOST }}
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
           ssh-known-hosts: ${{ secrets.PI_SSH_KNOWN_HOSTS }}
       - name: ansible-playbook --check --diff
@@ -59,15 +64,14 @@ jobs:
         env:
           PIHOLE_WEBPASSWORD: ${{ secrets.PIHOLE_WEBPASSWORD }}
           TAGS: ${{ inputs.tags }}
-          PI_HOST: ${{ vars.PI_TAILSCALE_HOST }}
-        run: |
-          ansible-playbook playbook.yml --check --diff \
-            -e "ansible_host=$PI_HOST" \
-            ${TAGS:+--tags "$TAGS"}
+          PI_HOST: ${{ secrets.PI_TAILSCALE_HOST }}
+        run: ansible-playbook playbook.yml --check --diff ${TAGS:+--tags "$TAGS"}
 
   apply:
     needs: check
-    if: inputs.mode == 'check-then-apply'
+    # Apply only what's on main (i.e. reviewed/merged). check-only may run
+    # from any branch to preview a change before merging it.
+    if: inputs.mode == 'check-then-apply' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Configure required reviewers on this environment (Settings ->
@@ -79,7 +83,7 @@ jobs:
         with:
           ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          pi-host: ${{ vars.PI_TAILSCALE_HOST }}
+          pi-host: ${{ secrets.PI_TAILSCALE_HOST }}
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
           ssh-known-hosts: ${{ secrets.PI_SSH_KNOWN_HOSTS }}
       - name: ansible-playbook (apply)
@@ -87,8 +91,5 @@ jobs:
         env:
           PIHOLE_WEBPASSWORD: ${{ secrets.PIHOLE_WEBPASSWORD }}
           TAGS: ${{ inputs.tags }}
-          PI_HOST: ${{ vars.PI_TAILSCALE_HOST }}
-        run: |
-          ansible-playbook playbook.yml --diff \
-            -e "ansible_host=$PI_HOST" \
-            ${TAGS:+--tags "$TAGS"}
+          PI_HOST: ${{ secrets.PI_TAILSCALE_HOST }}
+        run: ansible-playbook playbook.yml --diff ${TAGS:+--tags "$TAGS"}

@@ -8,15 +8,20 @@
 #   make deploy     apply (run `make check` first and read the diff)
 #   make validate   read-only post-deploy health check on the Pi
 #
-# PI must match ansible/inventory.ini (user@LAN-IP, or Tailscale name later).
+# The Pi's address is never committed (public repo). Set it per shell:
+#   export PI_HOST=<Pi's LAN IP>      (or its Tailscale IP later)
 
-PI    ?= pi@192.168.1.2
+PI_USER ?= pi
+PI       = $(PI_USER)@$(PI_HOST)
 VENV  ?= .venv
 BIN   := $(VENV)/bin
 TAGS  ?=
 TAGARG := $(if $(TAGS),--tags $(TAGS),)
 
-.PHONY: setup lint discover check deploy validate
+.PHONY: setup lint discover check deploy validate need-host
+
+need-host:
+	@test -n "$(PI_HOST)" || { echo "PI_HOST is not set: export PI_HOST=<Pi's IP>"; exit 1; }
 
 setup:
 	python3 -m venv $(VENV)
@@ -30,7 +35,7 @@ lint:
 	shellcheck --severity=style $$(git ls-files '*.sh')
 	docker compose --env-file docker/.env.example -f docker/docker-compose.yml config --quiet
 
-discover:
+discover: need-host
 	ssh $(PI) 'bash -s' < scripts/discover.sh
 
 check:
@@ -39,5 +44,5 @@ check:
 deploy:
 	cd ansible && ../$(BIN)/ansible-playbook playbook.yml --diff $(TAGARG)
 
-validate:
+validate: need-host
 	ssh $(PI) 'sudo bash -s' < scripts/validate.sh

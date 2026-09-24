@@ -12,7 +12,7 @@ service's `environment:` with dots turned into underscores:
 
 ```yaml
       # Local DNS records ("IP hostname"; separate multiple with ;)
-      FTLCONF_dns_hosts: "192.168.1.2 pi-gateway.lan"
+      FTLCONF_dns_hosts: "<pi-lan-ip> pi-gateway.lan"
 ```
 
 **What is *not* code:** adlists, groups, client assignments, and allow/deny

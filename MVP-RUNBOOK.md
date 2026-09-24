@@ -42,12 +42,12 @@ Manual end-to-end tests from a client device:
 
 ```bash
 # On a LAN laptop (point it at the Pi explicitly; no router change needed):
-dig @192.168.1.2 example.com +short          # an IP
-dig @192.168.1.2 doubleclick.net +short      # 0.0.0.0 if it's on your lists
+dig @$PI_HOST example.com +short          # an IP
+dig @$PI_HOST doubleclick.net +short      # 0.0.0.0 if it's on your lists
 
 # On a phone/laptop OFF the home network, with Tailscale on and exit node = pi-gateway:
 curl -s https://ifconfig.me                  # must print your HOME public IP
-ping 192.168.1.1                             # your router, reached via subnet route
+ping <router-ip>                             # your router, reached via subnet route
 ```
 
 A second `make deploy` straight after the first should report **`changed=0`**.
@@ -75,7 +75,7 @@ live with it.
 when nobody's on a video call.
 
 ```bash
-ssh pi@192.168.1.2 'sudo systemctl reboot'
+ssh pi@$PI_HOST 'sudo systemctl reboot'
 sleep 120 && make validate
 ```
 
@@ -96,7 +96,7 @@ tailnets, or suspected compromise):
 
 ```bash
 # Create a new one-off, non-reusable key in the admin console first.
-ssh pi@192.168.1.2 'sudo tailscale logout'          # remote tailnet sessions drop now
+ssh pi@$PI_HOST 'sudo tailscale logout'          # remote tailnet sessions drop now
 export TS_AUTHKEY='tskey-auth-NEW...'
 make check TAGS=tailscale && make deploy TAGS=tailscale   # role sees NeedsLogin and re-joins
 ```
@@ -104,7 +104,7 @@ make check TAGS=tailscale && make deploy TAGS=tailscale   # role sees NeedsLogin
 Run this **from the LAN**, since the Pi is off the tailnet between logout and
 re-join. Afterwards, re-approve the routes and disable key expiry on the new
 machine entry, and delete the old entry. If the Pi's Tailscale IP changed,
-also update the `PI_TAILSCALE_HOST` variable, `PI_SSH_KNOWN_HOSTS`, and the
+also update the `PI_TAILSCALE_HOST` secret, `PI_SSH_KNOWN_HOSTS`, and the
 `hosts` entry in your tailnet policy.
 
 **3. The CI credentials** (OAuth client secret, SSH deploy key), yearly or
@@ -138,7 +138,7 @@ new password, which means a few seconds without DNS.
 
 ```bash
 mkdir -p ~/pi-gateway-backups
-ssh pi@192.168.1.2 'sudo tar -C /var/backups/pi-gateway -cf - .' | tar -C ~/pi-gateway-backups -xf -
+ssh pi@$PI_HOST 'sudo tar -C /var/backups/pi-gateway -cf - .' | tar -C ~/pi-gateway-backups -xf -
 ls -lt ~/pi-gateway-backups | head
 ```
 
@@ -152,7 +152,7 @@ sudo mkdir -p /tmp/restore && sudo tar -xzf /var/backups/pi-gateway/pi-gateway-Y
 ```
 
 - **Preferred: web UI.** Copy `/tmp/restore/pihole-teleporter.zip` to your
-  laptop (`scp`), open `http://192.168.1.2/admin` → *Settings → Teleporter* →
+  laptop (`scp`), open `http://$PI_HOST/admin` → *Settings → Teleporter* →
   *Import*.
 - **CLI alternative (Pi):**
   ```bash
@@ -181,7 +181,7 @@ sudo docker compose start uptime-kuma
    hostname and user, and **enable SSH with your public key** in the Imager
    settings.
 2. Boot. The DHCP reservation gives it the same IP.
-3. `ssh-keygen -R 192.168.1.2`, then `ssh pi@192.168.1.2` and verify the
+3. `ssh-keygen -R $PI_HOST`, then `ssh pi@$PI_HOST` and verify the
    **new** host key fingerprint.
 4. Remove the old `pi-gateway` machine in the Tailscale admin console.
 5. `export PIHOLE_WEBPASSWORD=... TS_AUTHKEY=<new one-off key>`, then

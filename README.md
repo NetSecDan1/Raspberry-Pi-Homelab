@@ -53,7 +53,7 @@ Docker NATs every client, so Pi-hole sees them all as `172.17.0.1`. Per-device
 stats and group rules then stop working, and some clients misbehave.
 
 **Documented alternative (not implemented): macvlan.** A macvlan network gives
-the Pi-hole container its own LAN IP (e.g. `192.168.1.3`). You'd use it if
+the Pi-hole container its own LAN IP (a spare address outside the DHCP range). You'd use it if
 something else on the Pi needs ports 53/80/443. Trade-offs: the host can't
 talk to a macvlan container without an extra shim interface, you have to
 reserve the IP outside your router's DHCP range, and Tailscale subnet routing
@@ -72,7 +72,7 @@ Check these against your setup. `make discover` (below) confirms most of them.
 | # | Assumption | Where to change it |
 |---|---|---|
 | 1 | Raspberry Pi 4, 4–8 GB RAM, **64-bit** Raspberry Pi OS Lite (Debian 12 Bookworm or 13 Trixie). Ubuntu arm64 should also work but hasn't been tested. 32-bit OS is refused. | `ansible/playbook.yml` preflight |
-| 2 | LAN subnet is `192.168.1.0/24` and the Pi is `192.168.1.2`. | `ansible/group_vars/gateway.yml`, `ansible/inventory.ini`, `Makefile` `PI=` |
+| 2 | LAN subnet is `192.168.1.0/24`. The Pi's address is **not in the repo**; you set it per shell with `export PI_HOST=...`. | `ansible/group_vars/gateway.yml` (subnet) |
 | 3 | The Pi keeps its IP through a **DHCP reservation on your router** (a manual step on your side). This repo does not set a static IP. | — |
 | 4 | Login user is `pi` with **passwordless sudo** (the Raspberry Pi Imager default). If sudo asks for a password, add `-K` to local runs. CI needs passwordless sudo. | `inventory.ini` |
 | 5 | Fresh or near-fresh OS: no Docker yet, no bare-metal Pi-hole. If there is one, the playbook **stops** and tells you rather than removing anything. | — |
@@ -82,13 +82,14 @@ Check these against your setup. `make discover` (below) confirms most of them.
 
 ---
 
-## Step 0: SSH key access (skip if `ssh pi@192.168.1.2` already works without a password)
+## Step 0: SSH key access (skip if `ssh pi@$PI_HOST` already works without a password)
 
 On your workstation:
 
 ```bash
+export PI_HOST=<Pi's LAN IP>                  # every shell; never committed
 ssh-keygen -t ed25519 -C "you@workstation"   # accept defaults, set a passphrase
-ssh-copy-id pi@192.168.1.2                    # last time you type the Pi's password
+ssh-copy-id pi@$PI_HOST                    # last time you type the Pi's password
 ```
 
 The playbook **disables SSH password login**, which is why this comes first.
@@ -98,6 +99,7 @@ The playbook **disables SSH password login**, which is why this comes first.
 ## First deploy (from your workstation, on the home LAN)
 
 ```bash
+export PI_HOST=<Pi's LAN IP>     # never committed; put it in your shell profile if you like
 make setup                       # local venv: pinned ansible-core, ansible-lint, collections
 make discover | tee discovery-$(date +%F).txt   # READ-ONLY; review the output
 
@@ -194,14 +196,14 @@ action's `audience` input) removes the OAuth secret entirely.
    ```bash
    ssh-keygen -t ed25519 -f pi-gateway-deploy -C github-actions-deploy -N ''
    # Authorize it on the Pi, restricted to tailnet source addresses:
-   echo "from=\"100.64.0.0/10\" $(cat pi-gateway-deploy.pub)" | ssh pi@192.168.1.2 'cat >> ~/.ssh/authorized_keys'
+   echo "from=\"100.64.0.0/10\" $(cat pi-gateway-deploy.pub)" | ssh pi@$PI_HOST 'cat >> ~/.ssh/authorized_keys'
    ```
 
 4. **Pin the Pi's host key.** Take the fingerprint from the Pi directly, then
    compare it with what the network returns:
 
    ```bash
-   ssh pi@192.168.1.2 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'
+   ssh pi@$PI_HOST 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'
    ssh-keyscan -t ed25519 100.x.y.z | tee known_hosts.ci | ssh-keygen -lf -   # must match
    ```
 
@@ -214,7 +216,7 @@ action's `audience` input) removes the OAuth secret entirely.
    | Secret | `DEPLOY_SSH_KEY` | contents of `pi-gateway-deploy` (the private key) |
    | Secret | `PI_SSH_KNOWN_HOSTS` | contents of `known_hosts.ci` |
    | Secret | `PIHOLE_WEBPASSWORD` | same as your local export |
-   | Variable | `PI_TAILSCALE_HOST` | the Pi's Tailscale IP, e.g. `100.x.y.z` |
+   | Secret | `PI_TAILSCALE_HOST` | the Pi's Tailscale IP (a secret so it's masked in public logs) |
 
    Then delete `pi-gateway-deploy` and `known_hosts.ci` from your workstation
    (or put them in your password manager). `.gitignore` covers them, but don't
@@ -231,6 +233,20 @@ which happens from your workstation. If CI can reach the Pi at all, the Pi is
 already logged in.
 
 ### Public-repo safety notes
+
+This repo is public, so **nothing site-specific is committed**:
+
+- The Pi's LAN address comes from `PI_HOST` in your shell, and its Tailscale
+  address from a GitHub secret. Neither is written in any file.
+- Passwords and keys are only ever environment variables or GitHub Secrets.
+  `.gitignore` covers `.env`, deploy keys, and `discovery-*.txt`.
+- **GitHub Actions logs are world-readable on public repos.** Secrets are
+  masked in them, and the task that renders `.env` runs with `no_log`. Don't
+  add `-v` to the deploy workflow, because it prints task arguments.
+- `apply` only runs from `main`. `check-only` can run from any branch, so you
+  can preview a change before merging it.
+- Don't paste `make discover` or `make validate` output into issues or PRs.
+  It contains your addresses and service list.
 
 - Pull requests from forks run `lint` with **no access to secrets**, which is
   GitHub's default. `deploy.yml` has no `pull_request` trigger, and only users
