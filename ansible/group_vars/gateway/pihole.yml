@@ -1,0 +1,76 @@
+---
+# Pi-hole blocklists and allow/deny rules, as code.
+#
+# The stack role syncs these to Pi-hole through its API on every deploy:
+#   - listed + missing in Pi-hole      -> added
+#   - listed + different enabled/comment -> updated
+#   - listed with state: absent        -> removed
+#   - NOT listed here (added in the UI) -> left alone
+# Changing a list triggers a gravity rebuild (a minute or two; DNS keeps working).
+#
+# Preview with:  make check TAGS=pihole_lists
+# Apply with:    make deploy TAGS=pihole_lists
+#
+# Goal for this household: faster smart-TV menus and less background
+# chatter WITHOUT breaking streaming. Every list below was checked for
+# the domains YouTube / YouTube TV, Netflix playback, and device
+# connectivity checks depend on (googlevideo, ytimg, youtubei, tv.youtube,
+# connectivitycheck, captive.apple, msftconnecttest): none are blocked.
+#
+# Honest expectations:
+#   - Menus / home screens get snappier (ad tiles and telemetry fail fast).
+#   - Video quality and buffering do NOT change; that's your ISP and Wi-Fi.
+#   - YouTube ads are served from the same domains as the videos, so no
+#     DNS blocker can remove them. Don't add lists that claim to; they
+#     break YouTube.
+
+# ---- Blocklists ---------------------------------------------------------------
+# Tier 1 (on): broad, low-breakage. HaGeZi PRO already includes each TV
+# vendor's tracker list at a "won't break features" level, including the
+# ACR ("what's on screen") trackers: samsungacr.com, alphonso.tv (LG),
+# samba.tv, plus Roku logging and Amazon device metrics.
+#
+# Tier 2 (off): each vendor's FULL tracker list. More blocking, and HaGeZi
+# warns it can limit some features (e.g. ad-supported free channels,
+# recommendations). Flip one to `enabled: true` for a brand you own, deploy,
+# and use the TV for a few days before enabling the next one.
+pihole_lists:
+  # -- Tier 1 --------------------------------------------------------------
+  - address: https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+    comment: "Pi-hole default: StevenBlack unified hosts"
+    enabled: true
+  - address: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.txt
+    comment: "HaGeZi Multi PRO: ads, trackers, telemetry, TV ACR (safe level)"
+    enabled: true
+  - address: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt
+    comment: "HaGeZi Threat Intelligence (medium): malware, phishing, scams"
+    enabled: true
+
+  # -- Tier 2: per-vendor full tracker lists (opt in per brand) -------------
+  - address: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.samsung.txt
+    comment: "HaGeZi native: Samsung TVs/phones (full)"
+    enabled: false
+  - address: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.lgwebos.txt
+    comment: "HaGeZi native: LG webOS TVs (full)"
+    enabled: false
+  - address: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.roku.txt
+    comment: "HaGeZi native: Roku (full) - can blank some home-screen tiles"
+    enabled: false
+  - address: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/native.amazon.txt
+    comment: "HaGeZi native: Amazon Fire TV/Echo (full)"
+    enabled: false
+
+# ---- Individual domains -------------------------------------------------------
+# type: allow | deny     kind: exact | regex
+# Start empty: the lists above were verified not to block anything
+# streaming needs. When something breaks, find the blocked domain in the
+# Pi-hole Query Log (filter by the device) and add it here, e.g.:
+#
+#   - domain: example-breaking-domain.com
+#     type: allow
+#     kind: exact
+#     comment: "Samsung TV Plus guide stopped loading"
+#
+# For an immediate fix, "Allow" it in the Query Log UI first, then copy it
+# here so the next deploy keeps it.
+pihole_domains: []

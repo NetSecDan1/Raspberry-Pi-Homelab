@@ -42,6 +42,13 @@ services:
       FTLCONF_dns_listeningMode: "all"
       # Unbound already validates DNSSEC; doing it twice just adds latency.
       FTLCONF_dns_dnssec: "false"
+      # Per-device rate limit. Default is 1000 queries/60s. Smart TVs and
+      # streaming sticks retry blocked telemetry domains aggressively; a TV
+      # that trips the limit gets REFUSED for EVERYTHING until the window
+      # ends -- which looks exactly like "the TV's internet is broken".
+      # 3000/60s keeps real abuse in check without catching chatty TVs.
+      FTLCONF_dns_rateLimit_count: "3000"
+      FTLCONF_dns_rateLimit_interval: "60"
       # Pi-hole v6 ships an NTP server and clock-sync client. The host
       # already keeps time; turn both off so FTL doesn't grab UDP 123.
       FTLCONF_ntp_ipv4_active: "false"

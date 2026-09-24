@@ -42,6 +42,34 @@
     - net.ipv4.ip_forward
     - net.ipv6.conf.all.forwarding
 
+# ---- Throughput tuning ---------------------------------------------------
+- name: Tune UDP GRO forwarding for exit-node throughput
+  when: tailscale_udp_gro_forwarding
+  block:
+    - name: Install ethtool
+      ansible.builtin.apt:
+        name: ethtool
+        state: present
+
+    - name: Install UDP GRO boot-time unit
+      ansible.builtin.template:
+        src: tailscale-udp-gro.service.j2
+        dest: /etc/systemd/system/tailscale-udp-gro.service
+        owner: root
+        group: root
+        mode: "0644"
+      register: tailscale_gro_unit
+      notify: Restart tailscale-udp-gro
+
+    - name: Enable UDP GRO unit
+      ansible.builtin.systemd_service:
+        name: tailscale-udp-gro.service
+        enabled: true
+        state: started
+        daemon_reload: true
+      # In --check on first run the unit file isn't really written yet.
+      when: not (ansible_check_mode and tailscale_gro_unit is changed)
+
 - name: Enable and start tailscaled
   ansible.builtin.systemd_service:
     name: tailscaled

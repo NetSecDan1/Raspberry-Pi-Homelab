@@ -1,0 +1,265 @@
+---
+# Sync Pi-hole blocklists and allow/deny domains from group_vars/gateway/pihole.yml
+# using Pi-hole's own REST API (http://127.0.0.1/api on the Pi).
+#
+# Flow: log in -> read current state -> compute a plan (add / update /
+# remove / none per item) -> PRINT the plan -> apply it -> log out.
+# Reads and the plan run in --check too, so a dry run shows exactly what
+# would change. Only items declared in pihole.yml are touched; anything
+# added in the web UI is left alone.
+#
+# Blast radius: list changes trigger a gravity rebuild (1-3 min on a Pi 4).
+# DNS keeps answering from the old lists until the new build swaps in.
+
+- name: Log in to the Pi-hole API
+  ansible.builtin.uri:
+    url: "{{ stack_pihole_api }}/auth"
+    method: POST
+    body_format: json
+    body:
+      password: "{{ stack_pihole_password }}"
+    status_code: [200, 401]
+  register: stack_pihole_auth
+  # Retry only while the API isn't answering yet (a few seconds after the
+  # container turns healthy). A wrong password (401) stops immediately.
+  until: stack_pihole_auth.status | default(0) in [200, 401]
+  retries: 10
+  delay: 3
+  check_mode: false
+  no_log: true  # request carries the password, response carries the session ID
+
+# no_log above hides the reason for any failure, so say it plainly here.
+- name: Confirm Pi-hole API login succeeded
+  ansible.builtin.assert:
+    that: stack_pihole_auth.status == 200
+    fail_msg: >-
+      Pi-hole rejected the API login (HTTP {{ stack_pihole_auth.status }}).
+      PIHOLE_WEBPASSWORD must match the password the pihole container was
+      started with; redeploy the stack with the right value.
+    quiet: true
+
+- name: Sync lists and domains
+  vars:
+    stack_pihole_headers:
+      X-FTL-SID: "{{ stack_pihole_auth.json.session.sid }}"
+  block:
+    # ---- 1. Read current state (read-only) ------------------------------------
+    - name: Read current Pi-hole lists
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/lists"
+        headers: "{{ stack_pihole_headers }}"
+      register: stack_pihole_lists_now
+      check_mode: false
+      no_log: true  # headers contain the session ID
+
+    - name: Read current Pi-hole domains
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/domains"
+        headers: "{{ stack_pihole_headers }}"
+      register: stack_pihole_domains_now
+      check_mode: false
+      no_log: true
+
+    # Index current items by "type|address" / "type|kind|domain".
+    - name: Index current lists and domains
+      ansible.builtin.set_fact:
+        stack_lists_by_key: >-
+          {{ dict(stack_l | map(attribute='type')
+                    | zip(stack_l | map(attribute='address'))
+                    | map('join', '|')
+                  | zip(stack_l)) }}
+        stack_domains_by_key: >-
+          {{ dict(stack_d | map(attribute='type')
+                    | zip(stack_d | map(attribute='kind'), stack_d | map(attribute='domain'))
+                    | map('join', '|')
+                  | zip(stack_d)) }}
+        stack_list_plan: []
+        stack_domain_plan: []
+      vars:
+        stack_l: "{{ stack_pihole_lists_now.json.lists }}"
+        stack_d: "{{ stack_pihole_domains_now.json.domains }}"
+
+    # ---- 2. Plan -------------------------------------------------------------------
+    # One pass per desired item decides its action. Everything after this
+    # just executes the plan, so the rules live in exactly one place.
+    - name: Plan list changes
+      ansible.builtin.set_fact:
+        stack_list_plan: "{{ stack_list_plan + [{'action': stack_action, 'item': stack_want}] }}"
+      loop: "{{ stack_pihole_lists }}"
+      loop_control:
+        label: "{{ item.address }}"
+      vars:
+        stack_want:
+          address: "{{ item.address }}"
+          type: "{{ item.type | default('block') }}"
+          comment: "{{ item.comment | default('') }}"
+          enabled: "{{ item.enabled | default(true) }}"
+          state: "{{ item.state | default('present') }}"
+        stack_cur: "{{ stack_lists_by_key[stack_want.type ~ '|' ~ stack_want.address] | default({}) }}"
+        stack_action: >-
+          {%- if stack_want.state == 'absent' -%}
+            {{ 'remove' if stack_cur else 'none' }}
+          {%- elif not stack_cur -%}
+            add
+          {%- elif stack_cur.enabled != stack_want.enabled
+                or (stack_cur.comment | default('', true)) != stack_want.comment -%}
+            update
+          {%- else -%}
+            none
+          {%- endif -%}
+
+    - name: Plan domain changes
+      ansible.builtin.set_fact:
+        stack_domain_plan: "{{ stack_domain_plan + [{'action': stack_action, 'item': stack_want}] }}"
+      loop: "{{ stack_pihole_domains }}"
+      loop_control:
+        label: "{{ item.type }} {{ item.domain }}"
+      vars:
+        stack_want:
+          domain: "{{ item.domain }}"
+          type: "{{ item.type }}"
+          kind: "{{ item.kind | default('exact') }}"
+          comment: "{{ item.comment | default('') }}"
+          enabled: "{{ item.enabled | default(true) }}"
+          state: "{{ item.state | default('present') }}"
+        stack_cur: >-
+          {{ stack_domains_by_key[stack_want.type ~ '|' ~ stack_want.kind ~ '|' ~ stack_want.domain] | default({}) }}
+        stack_action: >-
+          {%- if stack_want.state == 'absent' -%}
+            {{ 'remove' if stack_cur else 'none' }}
+          {%- elif not stack_cur -%}
+            add
+          {%- elif stack_cur.enabled != stack_want.enabled
+                or (stack_cur.comment | default('', true)) != stack_want.comment -%}
+            update
+          {%- else -%}
+            none
+          {%- endif -%}
+
+    # This is the dry-run preview: in --check it's the last thing that runs.
+    - name: Show planned Pi-hole changes
+      ansible.builtin.debug:
+        msg: >-
+          {%- set out = [] -%}
+          {%- for p in stack_list_plan + stack_domain_plan if p.action != 'none' -%}
+            {%- set what = p.item.address if 'address' in p.item
+                           else p.item.type ~ '/' ~ p.item.kind ~ ' ' ~ p.item.domain -%}
+            {%- set _ = out.append(p.action ~ ': ' ~ what ~ ('' if p.item.enabled else ' (disabled)')) -%}
+          {%- endfor -%}
+          {{ out if out else 'No Pi-hole list/domain changes.' }}
+
+    # ---- 3. Apply: lists ------------------------------------------------------------
+    - name: Add lists
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/lists?type={{ item.type }}"
+        method: POST
+        headers: "{{ stack_pihole_headers }}"
+        body_format: json
+        body:
+          address: "{{ item.address }}"
+          comment: "{{ item.comment }}"
+          enabled: "{{ item.enabled }}"
+          groups: [0]
+        status_code: 201
+      loop: "{{ stack_list_plan | selectattr('action', 'eq', 'add') | map(attribute='item') | list }}"
+      loop_control:
+        label: "{{ item.address }}"
+      changed_when: true
+
+    - name: Update lists
+      ansible.builtin.uri:
+        # The address is the resource ID, so it must be fully URL-encoded
+        # (Jinja's urlencode leaves "/" alone, hence the replace).
+        url: "{{ stack_pihole_api }}/lists/{{ item.address | urlencode | replace('/', '%2F') }}?type={{ item.type }}"
+        method: PUT
+        headers: "{{ stack_pihole_headers }}"
+        body_format: json
+        body:
+          type: "{{ item.type }}"
+          comment: "{{ item.comment }}"
+          enabled: "{{ item.enabled }}"
+          # Keep whatever group assignment was made in the UI.
+          groups: "{{ stack_lists_by_key[item.type ~ '|' ~ item.address].groups | default([0]) }}"
+        status_code: 200
+      loop: "{{ stack_list_plan | selectattr('action', 'eq', 'update') | map(attribute='item') | list }}"
+      loop_control:
+        label: "{{ item.address }}"
+      changed_when: true
+
+    - name: Remove lists
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/lists/{{ item.address | urlencode | replace('/', '%2F') }}?type={{ item.type }}"
+        method: DELETE
+        headers: "{{ stack_pihole_headers }}"
+        status_code: 204
+      loop: "{{ stack_list_plan | selectattr('action', 'eq', 'remove') | map(attribute='item') | list }}"
+      loop_control:
+        label: "{{ item.address }}"
+      changed_when: true
+
+    # ---- 3. Apply: domains ----------------------------------------------------------
+    - name: Add domains
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/domains/{{ item.type }}/{{ item.kind }}"
+        method: POST
+        headers: "{{ stack_pihole_headers }}"
+        body_format: json
+        body:
+          domain: "{{ item.domain }}"
+          comment: "{{ item.comment }}"
+          enabled: "{{ item.enabled }}"
+          groups: [0]
+        status_code: 201
+      loop: "{{ stack_domain_plan | selectattr('action', 'eq', 'add') | map(attribute='item') | list }}"
+      loop_control:
+        label: "{{ item.type }} {{ item.domain }}"
+      changed_when: true
+
+    - name: Update domains
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/domains/{{ item.type }}/{{ item.kind }}/{{ item.domain | urlencode | replace('/', '%2F') }}"
+        method: PUT
+        headers: "{{ stack_pihole_headers }}"
+        body_format: json
+        body:
+          type: "{{ item.type }}"
+          kind: "{{ item.kind }}"
+          comment: "{{ item.comment }}"
+          enabled: "{{ item.enabled }}"
+          groups: "{{ stack_domains_by_key[item.type ~ '|' ~ item.kind ~ '|' ~ item.domain].groups | default([0]) }}"
+        status_code: 200
+      loop: "{{ stack_domain_plan | selectattr('action', 'eq', 'update') | map(attribute='item') | list }}"
+      loop_control:
+        label: "{{ item.type }} {{ item.domain }}"
+      changed_when: true
+
+    - name: Remove domains
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/domains/{{ item.type }}/{{ item.kind }}/{{ item.domain | urlencode | replace('/', '%2F') }}"
+        method: DELETE
+        headers: "{{ stack_pihole_headers }}"
+        status_code: 204
+      loop: "{{ stack_domain_plan | selectattr('action', 'eq', 'remove') | map(attribute='item') | list }}"
+      loop_control:
+        label: "{{ item.type }} {{ item.domain }}"
+      changed_when: true
+
+    # Domain rules apply instantly; list changes need gravity rebuilt.
+    - name: Rebuild gravity (download and apply lists)
+      ansible.builtin.command:
+        argv: "{{ stack_pihole_gravity_cmd }}"
+      changed_when: true
+      when: stack_list_plan | rejectattr('action', 'eq', 'none') | list | length > 0
+
+  always:
+    # Pi-hole caps concurrent API sessions; always hand ours back.
+    - name: Log out of the Pi-hole API
+      ansible.builtin.uri:
+        url: "{{ stack_pihole_api }}/auth"
+        method: DELETE
+        headers:
+          X-FTL-SID: "{{ stack_pihole_auth.json.session.sid }}"
+        status_code: [200, 204, 401, 404, 410]
+      check_mode: false
+      no_log: true
+      when: stack_pihole_auth.json.session.sid | default('') | length > 0

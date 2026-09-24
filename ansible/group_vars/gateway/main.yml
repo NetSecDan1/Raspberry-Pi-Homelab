@@ -1,7 +1,7 @@
 ---
 # Site-specific settings for the [gateway] group. Everything you are likely
 # to need to change lives here; role defaults (roles/*/defaults/main.yml)
-# hold the rest.
+# hold the rest. Pi-hole blocklists and allow/deny rules are in pihole.yml.
 #
 # Secrets are NOT stored here. They come from environment variables at run
 # time (locally: export them; in CI: GitHub Secrets):

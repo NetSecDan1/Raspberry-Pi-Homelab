@@ -15,9 +15,12 @@ service's `environment:` with dots turned into underscores:
       FTLCONF_dns_hosts: "<pi-lan-ip> pi-gateway.lan"
 ```
 
-**What is *not* code:** adlists, groups, client assignments, and allow/deny
-lists live in Pi-hole's `gravity.db`. Manage them in the web UI; the nightly
-Teleporter backup (`ansible/roles/backup`) captures them.
+**Blocklists and allow/deny domains are code too**, but they live in
+Pi-hole's database rather than its config, so they're managed differently:
+declared in `ansible/group_vars/gateway/pihole.yml` and synced through
+Pi-hole's API by the `stack` role (`make deploy TAGS=pihole_lists`). Groups
+and client assignments stay in the web UI. The nightly Teleporter backup
+captures all of it.
 
 Runtime data (`/etc/pihole` inside the container) lives on the Pi at
 `/opt/pi-gateway/data/pihole` and is never committed.

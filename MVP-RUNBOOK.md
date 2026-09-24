@@ -14,6 +14,8 @@ your workstation in the repo root.
 | Preview a deploy | `make check` (or Actions → deploy → `check-only`) | No |
 | Deploy | `make deploy` (or Actions → deploy → `check-then-apply`) | Yes |
 | Redeploy only containers | `make check TAGS=stack` then `make deploy TAGS=stack` | Yes: containers only |
+| Preview / apply blocklist changes | `make check TAGS=pihole_lists` / `make deploy TAGS=pihole_lists` | Yes (apply): lists + gravity rebuild |
+| A device broke after blocking | see [docs/SMART-TVS.md](docs/SMART-TVS.md#something-broke-fastest-fix-first) | UI allow = immediate |
 | Manual backup **(Pi)** | `sudo /usr/local/sbin/pi-gateway-backup` | Writes one archive |
 | Container status **(Pi)** | `sudo docker compose --project-directory /opt/pi-gateway ps` | No |
 | Container logs **(Pi)** | `sudo docker compose --project-directory /opt/pi-gateway logs --tail 100 pihole` | No |

@@ -16,8 +16,13 @@ Everything is driven from Git: Ansible configures the host, Docker Compose
 runs the services, and GitHub Actions lints every change and deploys when you
 ask it to.
 
-Day-2 operations (monthly checks, key rotation, restore, rollback) are in
-[MVP-RUNBOOK.md](MVP-RUNBOOK.md).
+Guides:
+- [MVP-RUNBOOK.md](MVP-RUNBOOK.md): day-2 operations (monthly checks, key
+  rotation, restore, rollback)
+- [docs/SMART-TVS.md](docs/SMART-TVS.md): blocklists, getting TVs onto
+  Pi-hole, and quick fixes when a device misbehaves
+- [docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md): using the homelab and your
+  home connection from your phone
 
 ---
 
@@ -72,11 +77,11 @@ Check these against your setup. `make discover` (below) confirms most of them.
 | # | Assumption | Where to change it |
 |---|---|---|
 | 1 | Raspberry Pi 4, 4–8 GB RAM, **64-bit** Raspberry Pi OS Lite (Debian 12 Bookworm or 13 Trixie). Ubuntu arm64 should also work but hasn't been tested. 32-bit OS is refused. | `ansible/playbook.yml` preflight |
-| 2 | LAN subnet is `192.168.1.0/24`. The Pi's address is **not in the repo**; you set it per shell with `export PI_HOST=...`. | `ansible/group_vars/gateway.yml` (subnet) |
+| 2 | LAN subnet is `192.168.1.0/24`. The Pi's address is **not in the repo**; you set it per shell with `export PI_HOST=...`. | `ansible/group_vars/gateway/main.yml` (subnet) |
 | 3 | The Pi keeps its IP through a **DHCP reservation on your router** (a manual step on your side). This repo does not set a static IP. | — |
 | 4 | Login user is `pi` with **passwordless sudo** (the Raspberry Pi Imager default). If sudo asks for a password, add `-K` to local runs. CI needs passwordless sudo. | `inventory.ini` |
 | 5 | Fresh or near-fresh OS: no Docker yet, no bare-metal Pi-hole. If there is one, the playbook **stops** and tells you rather than removing anything. | — |
-| 6 | Timezone `Etc/UTC`. | `group_vars/gateway.yml` |
+| 6 | Timezone `Etc/UTC`. | `group_vars/gateway/main.yml` |
 | 7 | GitHub repo may be **public**. No secret is ever committed; all of them go in GitHub Secrets or local env vars. | — |
 | 8 | Nothing is port-forwarded to the Pi, now or later. Pi-hole answers DNS on every interface so tailnet clients work, and that's only safe behind NAT. | — |
 
@@ -276,13 +281,17 @@ This repo is public, so **nothing site-specific is committed**:
 ```
 ansible/
   ansible.cfg, inventory.ini, requirements.yml, playbook.yml
-  group_vars/gateway.yml     # the settings you edit
+  group_vars/gateway/
+    main.yml                 # the settings you edit
+    pihole.yml               # blocklists + allow/deny domains (synced via Pi-hole API)
   roles/
     hardening/   sshd key-only, fail2ban, unattended-upgrades
     docker/      Docker Engine + compose plugin (official repo), log rotation
-    tailscale/   exit node + subnet router, IP forwarding, idempotent prefs
-    stack/       deploys docker/ to /opt/pi-gateway, `compose up --wait`
+    tailscale/   exit node + subnet router, IP forwarding, idempotent prefs, UDP GRO tuning
+    stack/       deploys docker/ to /opt/pi-gateway, `compose up --wait`, syncs Pi-hole lists
     backup/      nightly teleporter + data backup, 14-day retention
+docs/
+  SMART-TVS.md, REMOTE-ACCESS.md
 docker/
   docker-compose.yml, .env.example
   pihole/README.md           # config-as-code via FTLCONF_* env vars

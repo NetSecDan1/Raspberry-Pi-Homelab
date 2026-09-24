@@ -7,12 +7,14 @@
   ansible.builtin.set_fact:
     # False only during --check on a Pi that doesn't have Docker yet.
     stack_docker_present: "{{ not ansible_check_mode or 'docker-ce' in ansible_facts.packages }}"
+  tags: [always]  # needed even when running only --tags pihole_lists
 
 - name: Require the Pi-hole admin password
   ansible.builtin.assert:
     that: stack_pihole_password | length > 0
     fail_msg: "PIHOLE_WEBPASSWORD is not set in the environment. export it (locally) or add the GitHub Secret (CI)."
     quiet: true
+  tags: [pihole_lists]  # the list sync logs in with it too
 
 # ---- Preflight: port conflicts ------------------------------------------------
 # Read-only. Catches the two common surprises: systemd-resolved's stub
@@ -102,3 +104,26 @@
     wait: true
     wait_timeout: 300
   when: stack_docker_present
+
+- name: Check whether the pihole container is running
+  ansible.builtin.command:
+    argv: [docker, inspect, --format, "{{ '{{' }}.State.Running{{ '}}' }}", pihole]
+  register: stack_pihole_running
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: stack_docker_present
+  tags: [pihole_lists]
+
+# Blocklists and allow/deny rules from group_vars/gateway/pihole.yml.
+# Skipped in --check on a Pi without Docker yet: there's no Pi-hole to ask.
+- name: Sync Pi-hole lists and domains
+  ansible.builtin.include_tasks:
+    file: pihole_lists.yml
+    apply:
+      tags: [pihole_lists]
+  when:
+    - stack_docker_present
+    # A dry run before the stack exists has no Pi-hole to talk to.
+    - not ansible_check_mode or stack_pihole_running.stdout | default('') == 'true'
+  tags: [pihole_lists]

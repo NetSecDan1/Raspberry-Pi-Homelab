@@ -1,5 +1,5 @@
 ---
-# Overridden in group_vars/gateway.yml; defaults here keep the role usable
+# Overridden in group_vars/gateway/main.yml; defaults here keep the role usable
 # on its own.
 tailscale_hostname: "{{ inventory_hostname }}"
 tailscale_advertise_exit_node: true
@@ -9,3 +9,10 @@ tailscale_advertise_routes: []
 # lands in the repo, inventory, or process list. Once the node is logged in
 # this is ignored; tailscaled keeps its own node key in /var/lib/tailscale.
 tailscale_authkey: "{{ lookup('ansible.builtin.env', 'TS_AUTHKEY', default='') }}"
+
+# Exit-node / subnet-router throughput tuning recommended by Tailscale for
+# Linux 6.2+ kernels: let the kernel batch forwarded UDP (WireGuard) packets.
+# Noticeably raises throughput for phone -> home -> internet traffic on a Pi.
+tailscale_udp_gro_forwarding: true
+# The interface carrying the default route (eth0 on a wired Pi).
+tailscale_gro_interface: "{{ ansible_default_ipv4.interface | default('eth0') }}"

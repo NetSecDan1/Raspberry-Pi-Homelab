@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+# Tailscale exit-node/subnet-router UDP GRO tuning. NIC offload settings
+# reset on reboot, so this re-applies them at boot. The leading "-" means a
+# failure (e.g. an older kernel) is logged but never blocks boot.
+[Unit]
+Description=Tailscale UDP GRO forwarding on {{ tailscale_gro_interface }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/sbin/ethtool -K {{ tailscale_gro_interface }} rx-udp-gro-forwarding on rx-gro-list off
+
+[Install]
+WantedBy=multi-user.target

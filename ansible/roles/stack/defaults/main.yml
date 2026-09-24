@@ -11,3 +11,11 @@ stack_host_ports: [53, 80, 443]
 
 # Where the compose files live in this repo, relative to the playbook.
 stack_repo_docker_dir: "{{ playbook_dir }}/../docker"
+
+# Pi-hole API on the Pi itself (Pi-hole uses host networking).
+stack_pihole_api: "http://127.0.0.1/api"
+# Declared in group_vars/gateway/pihole.yml.
+stack_pihole_lists: "{{ pihole_lists | default([]) }}"
+stack_pihole_domains: "{{ pihole_domains | default([]) }}"
+# Rebuilds gravity after list changes (overridable for testing).
+stack_pihole_gravity_cmd: [docker, exec, pihole, pihole, -g]

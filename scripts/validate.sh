@@ -53,6 +53,12 @@ else
   else bad "blocked domain $gdom returned '${ans:-nothing}' (expected 0.0.0.0)"; fi
 fi
 
+# A device that trips the rate limit gets REFUSED for everything for up to
+# a minute -- the classic "Pi-hole broke my TV" symptom.
+rl="$(docker exec pihole sh -c 'grep -h "Rate-limiting" /var/log/pihole/FTL.log 2>/dev/null' | tail -n 3)"
+if [[ -z $rl ]]; then ok "no devices rate-limited (current FTL log)"
+else wn "some device hit the DNS rate limit; recent entries:"; printf '        %s\n' "$rl"; fi
+
 hdr "Tailscale"
 if command -v tailscale >/dev/null; then
   ts_json="$(tailscale status --json 2>/dev/null)"
@@ -72,6 +78,12 @@ if command -v tailscale >/dev/null; then
   done
 else
   bad "tailscale not installed"
+fi
+
+iface="$(ip -4 route show default | awk '{print $5; exit}')"
+if command -v ethtool >/dev/null && [[ -n $iface ]]; then
+  if ethtool -k "$iface" 2>/dev/null | grep -q '^rx-udp-gro-forwarding: on'; then ok "UDP GRO forwarding on $iface (exit-node throughput)"
+  else wn "UDP GRO forwarding off on $iface (check: systemctl status tailscale-udp-gro)"; fi
 fi
 
 for k in net.ipv4.ip_forward net.ipv6.conf.all.forwarding; do
