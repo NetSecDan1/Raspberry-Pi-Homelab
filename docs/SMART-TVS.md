@@ -67,9 +67,9 @@ do the rest.
   automatic until the Pi is back.
 
 **Option B — the router hands out the Pi as DNS (whole house).**
-Set your router's DHCP DNS server to the Pi's LAN IP. **Heads-up:** many ISP
-gateways, including AT&T models that sit at `192.168.1.254`, don't let you
-change the DHCP DNS server. If yours doesn't, use A, or C below.
+Set your router's DHCP DNS server to the Pi's LAN IP. **Heads-up:** many
+ISP-supplied gateways don't let you change the DHCP DNS server. If yours
+doesn't, use A, or C below.
 
 **Option C — Pi-hole becomes the DHCP server.** You turn off the router's
 DHCP and Pi-hole hands out addresses instead. That's a router change and a
