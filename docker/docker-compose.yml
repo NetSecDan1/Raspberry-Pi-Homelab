@@ -88,7 +88,7 @@ services:
   watchtower:
     # Maintained fork: the original containrrr/watchtower has been
     # unmaintained since 2023 and fails against current Docker Engine APIs.
-    image: nickfedor/watchtower:1.22.3
+    image: nickfedor/watchtower:1.23.0
     container_name: watchtower
     environment:
       TZ: ${TZ:-Etc/UTC}
