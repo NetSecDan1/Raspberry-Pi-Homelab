@@ -20,7 +20,7 @@ x-watchtower: &watchtower-enabled
 
 services:
   pihole:
-    image: pihole/pihole:2026.09.0
+    image: pihole/pihole:2026.10.0
     container_name: pihole
     # Host networking: Pi-hole sees real client IPs (per-device stats and
     # group rules work) and answers on the Pi's own LAN + tailnet addresses.
