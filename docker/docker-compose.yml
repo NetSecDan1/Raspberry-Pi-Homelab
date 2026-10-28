@@ -105,7 +105,7 @@ services:
     labels: *watchtower-enabled
 
   uptime-kuma:
-    image: louislam/uptime-kuma:2.5.5
+    image: louislam/uptime-kuma:2.5.7
     container_name: uptime-kuma
     ports:
       # LAN + tailnet reachable. Not internet-reachable: no port forward.
