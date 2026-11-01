@@ -2,5 +2,5 @@
 # workstation behave identically.
 #   python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements-dev.txt
 ansible-core==2.19.13
-ansible-lint==26.9.0
+ansible-lint==26.10.1
 yamllint==1.38.0
